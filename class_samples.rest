@@ -1,0 +1,712 @@
+# @name getToken
+POST https://login.microsoftonline.com/{{tenantId}}/oauth2/v2.0/token
+Content-Type: application/x-www-form-urlencoded
+
+client_id={{clientId}}&
+scope=https%3A%2F%2Fgraph.microsoft.com%2F.default&
+client_secret={{clientSecret}}& 
+grant_type=client_credentials
+
+###
+@accessToken = {{getToken.response.body.access_token}}
+
+# ============================================================
+# SECTION 1: APPLICATIONS
+# ============================================================
+# Get-AppsUsingWindowsAzureAdApi
+# Find service principal for Windows Azure Active Directory
+# Permission: Application.Read.All | Directory.Read.All
+
+###
+# [Applications] Get Windows Azure AD service principal by appId
+GET https://graph.microsoft.com/v1.0/servicePrincipals
+    ?$filter=appId eq '00000002-0000-0000-c000-000000000000'
+    &$select=id
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Applications] Get OAuth2 permission grants for Windows AAD resource
+# Replace {windowsAzureAdPrincipalId} with the id returned above
+GET https://graph.microsoft.com/v1.0/oauth2PermissionGrants
+    ?$filter=resourceId eq '{windowsAzureAdPrincipalId}'
+    &$select=clientId
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Applications] Get service principals by id list (up to 15 at a time)
+# Replace {id1},{id2},... with actual IDs from the consent grant results
+GET https://graph.microsoft.com/v1.0/servicePrincipals
+    ?$filter=id in ('{id1}','{id2}','{id3}')
+    &$select=id,appId,appOwnerOrganizationId,displayName
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Applications] Get app registration with owners expanded
+# Replace {appId} with the target application's appId
+GET https://graph.microsoft.com/v1.0/applications
+    ?$filter=appId eq '{appId}'
+    &$select=id
+    &$expand=owners($select=displayName,userPrincipalName)
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+
+# ============================================================
+# SECTION 2: DRIVES
+# ============================================================
+# Large file upload requires a multi-step process:
+# 1. Create an upload session
+# 2. PUT file chunks using the uploadUrl from the session
+
+###
+# [Drives] Create an upload session for a large file
+# Replace {driveId} and {fileName} with actual values
+POST https://graph.microsoft.com/v1.0/drives/{driveId}/items/root:/{fileName}:/createUploadSession
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "item": {
+    "name": "{fileName}"
+  }
+}
+
+###
+# [Drives] Upload a file chunk (PUT to the uploadUrl from session above)
+# Replace {uploadUrl} with the URL from the createUploadSession response
+# Content-Range header must specify byte range and total size
+PUT {uploadUrl}
+Content-Range: bytes 0-327679/1000000
+Content-Type: application/octet-stream
+
+< path/to/your/local/file.bin
+
+
+# ============================================================
+# SECTION 3: GROUPS
+# ============================================================
+# GetOrphanGroups - Groups with 0 or 1 owners
+# Permission: Group.Read.All
+
+###
+# [Groups] Get all Unified (Microsoft 365) groups
+GET https://graph.microsoft.com/v1.0/groups
+    ?$filter=groupTypes/any(c:c eq 'Unified')
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Groups] Get owners for a specific group
+# Replace {groupId} with actual group object ID
+GET https://graph.microsoft.com/v1.0/groups/{groupId}/owners
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Groups] Get members for a specific group
+# Replace {groupId} with actual group object ID
+GET https://graph.microsoft.com/v1.0/groups/{groupId}/members
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+
+# ============================================================
+# SECTION 4: MAIL
+# ============================================================
+# Permission: Mail.Read
+# Replace {userId} with the user's UPN or object ID
+
+###
+# [Mail] 01 - Get top 5 messages for a user
+GET https://graph.microsoft.com/v1.0/users/{userId}/messages
+    ?$top=5
+    &$select=id,subject,conversationId,parentFolderId,createdDateTime,from,isRead
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Mail] 02 - Search messages by subject keyword
+# Replace {searchString} with your search term (e.g., "Weekly digest: Office 365 changes")
+GET https://graph.microsoft.com/v1.0/users/{userId}/messages
+    ?$search="{searchString}"
+    &$select=id,subject,conversationId,parentFolderId,createdDateTime,from,isRead
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Mail] 03 - Get a mail folder by ID (used to resolve parentFolderId)
+# Replace {mailFolderId} with the parentFolderId from a message
+GET https://graph.microsoft.com/v1.0/users/{userId}/mailFolders/{mailFolderId}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Mail] 04 - Get internet message headers for a specific message
+# Replace {messageId} with the target message ID
+GET https://graph.microsoft.com/v1.0/users/{userId}/messages/{messageId}
+    ?$select=internetMessageHeaders
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Mail] 05 - Send an email on behalf of a user
+# Permission: Mail.Send
+# Replace {userId} with the sender's UPN or object ID
+POST https://graph.microsoft.com/v1.0/users/{userId}/sendMail
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "message": {
+    "subject": "Hello MS Graph!",
+    "body": {
+      "contentType": "Text",
+      "content": "This is a sample mail sent via MS Graph. How cool is this?"
+    },
+    "toRecipients": [
+      {
+        "emailAddress": {
+          "address": "recipient@contoso.com"
+        }
+      }
+    ]
+  }
+}
+
+###
+# [Mail] 06 - Get calendar view for a room/user (utilization report)
+# Permission: Calendars.Read
+# Replace {roomEmail} with the room mailbox address
+GET https://graph.microsoft.com/v1.0/users/{roomEmail}/calendarView
+    ?startDateTime=2020-06-25T00:00:00Z
+    &endDateTime=2020-08-03T00:00:00Z
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+
+# ============================================================
+# SECTION 5: REPORTING
+# ============================================================
+# Permission: Reports.Read.All
+
+###
+# [Reporting] 01 - Get email activity user detail (last 7 days)
+# Supported periods: D7, D30, D90, D180
+GET https://graph.microsoft.com/v1.0/reports/getEmailActivityUserDetail(period='D7')
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Reporting] 02 - Get Azure AD sign-ins (last 5)
+# Permission: AuditLog.Read.All, Directory.Read.All (requires Azure AD P1+)
+GET https://graph.microsoft.com/v1.0/auditLogs/signIns
+    ?$top=5
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Reporting] 03 - Get Teams user activity detail (last 180 days)
+GET https://graph.microsoft.com/v1.0/reports/getTeamsUserActivityUserDetail(period='D180')
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Reporting] 03 - Get OneDrive usage account detail (last 180 days)
+GET https://graph.microsoft.com/v1.0/reports/getOneDriveUsageAccountDetail(period='D180')
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Reporting] 03 - Get email activity user detail (last 180 days)
+GET https://graph.microsoft.com/v1.0/reports/getEmailActivityUserDetail(period='D180')
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Reporting] 03 - Get mailbox usage detail (last 180 days)
+GET https://graph.microsoft.com/v1.0/reports/getMailboxUsageDetail(period='D180')
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Reporting] 03 - Get SharePoint activity user detail (last 180 days)
+GET https://graph.microsoft.com/v1.0/reports/getSharePointActivityUserDetail(period='D180')
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Reporting] 03 - Get Yammer activity user detail (last 180 days)
+GET https://graph.microsoft.com/v1.0/reports/getYammerActivityUserDetail(period='D180')
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Reporting] 03 - Get users with sign-in activity (beta, for signInActivity property)
+# Permission: User.Read.All, AuditLog.Read.All
+GET https://graph.microsoft.com/beta/users
+    ?$select=displayName,userPrincipalName,mail,id,createdDateTime,signInActivity,userType
+    &$top=999
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Reporting] 04 - Get subscribed SKUs (license availability report)
+# Permission: Organization.Read.All
+GET https://graph.microsoft.com/v1.0/subscribedSkus
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Reporting] 04 - Send licensing report email
+# Permission: Mail.Send
+# Replace {senderUserId} with the sending user's UPN or ID
+POST https://graph.microsoft.com/v1.0/users/{senderUserId}/sendMail
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "message": {
+    "subject": "Azure/O365 Licensing Report",
+    "body": {
+      "contentType": "HTML",
+      "content": "<p>Please find the current licensing status below.</p>"
+    },
+    "toRecipients": [
+      {
+        "emailAddress": {
+          "address": "receiver@contoso.com"
+        }
+      }
+    ]
+  }
+}
+
+
+# ============================================================
+# SECTION 6: SITES (SHAREPOINT)
+# ============================================================
+
+###
+# [Sites] 01 - Get deleted groups (to find orphaned SPO sites)
+# Permission: Group.Read.All
+GET https://graph.microsoft.com/v1.0/directory/deletedItems/microsoft.graph.group
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Sites] 01 - Search for a SPO site by name
+# Replace {siteName} with the deleted group display name
+GET https://graph.microsoft.com/v1.0/sites
+    ?search={siteName}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Sites] 02 - Get a SharePoint site by URL (resolve to Graph-friendly ID)
+# Permission: Sites.FullControl.All
+# Format: {hostname}:{/path}
+GET https://graph.microsoft.com/v1.0/sites/contoso.sharepoint.com:/sites/sample
+    ?$select=id
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Sites] 02 - Grant a Sites.Selected app permission on a site (read or write)
+# Replace {siteId} with the site's Graph ID
+POST https://graph.microsoft.com/v1.0/sites/{siteId}/permissions
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "roles": ["read"],
+  "grantedToIdentities": [
+    {
+      "application": {
+        "id": "00000000-0000-0000-0000-000000000000",
+        "displayName": "My Sites.Selected app registration"
+      }
+    }
+  ]
+}
+
+###
+# [Sites] 02 - Update a site permission to full control
+# Replace {siteId} and {permissionId} with actual values
+PATCH https://graph.microsoft.com/v1.0/sites/{siteId}/permissions/{permissionId}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "roles": ["fullcontrol"]
+}
+
+
+# ============================================================
+# SECTION 7: TEAMS
+# ============================================================
+
+###
+# [Teams] 01 - Find a Team (Group) by display name
+# Permission: Group.Read.All
+GET https://graph.microsoft.com/v1.0/groups
+    ?$filter=displayName eq '{teamDisplayName}'
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Teams] 01 - Create a channel on an existing Team
+# Permission: Group.ReadWrite.All
+# Replace {teamId} with the group/team ID from above
+POST https://graph.microsoft.com/v1.0/teams/{teamId}/channels
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "displayName": "<Channel Display Name>",
+  "description": "<Channel Description>"
+}
+
+###
+# [Teams] 02 - Create a new Team from the standard template
+# Permission: Directory.ReadWrite.All, Group.ReadWrite.All, Team.Create
+POST https://graph.microsoft.com/v1.0/teams
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "template@odata.bind": "https://graph.microsoft.com/v1.0/teamsTemplates('standard')",
+  "displayName": "Product Team",
+  "description": "Product Team for internal collaboration",
+  "members": [
+    {
+      "@odata.type": "#microsoft.graph.aadUserConversationMember",
+      "roles": ["owner"],
+      "user@odata.bind": "https://graph.microsoft.com/v1.0/users('owner@contoso.com')"
+    }
+  ]
+}
+
+###
+# [Teams] 02 - Get teams joined by a user
+# Replace {userId} with the owner's UPN or object ID
+GET https://graph.microsoft.com/v1.0/users/{userId}/joinedTeams
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+
+# ============================================================
+# SECTION 8: USERS
+# ============================================================
+
+###
+# [Users] 01 - Get guest users with sign-in info
+# Permission: User.Read.All, AuditLog.Read.All, Directory.Read.All
+GET https://graph.microsoft.com/v1.0/users
+    ?$filter=userType eq 'Guest'
+    &$select=id,mail,userPrincipalName
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Users] 01 - Get the most recent sign-in for a specific user
+# Replace {userId} with the guest user's object ID
+GET https://graph.microsoft.com/v1.0/auditLogs/signIns
+    ?$filter=userId eq '{userId}'
+    &$top=1
+    &$select=createdDateTime
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Users] 02 - Delete a user
+# Permission: User.ReadWrite.All
+DELETE https://graph.microsoft.com/v1.0/users/{userPrincipalName}
+Authorization: Bearer {{accessToken}}
+
+###
+# [Users] 03 - Create a licensed user
+# Permission: User.ReadWrite.All
+POST https://graph.microsoft.com/v1.0/users
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "accountEnabled": true,
+  "displayName": "Graph PowerShell",
+  "mailNickname": "graphposh",
+  "userPrincipalName": "graphposh@contoso.onmicrosoft.com",
+  "givenName": "Graph",
+  "surname": "PowerShell",
+  "jobTitle": "PowerShell Pro",
+  "usageLocation": "US",
+  "passwordPolicies": "DisablePasswordExpiration, DisableStrongPassword",
+  "passwordProfile": {
+    "password": "TempP@ss1234!",
+    "forceChangePasswordNextSignIn": false
+  }
+}
+
+###
+# [Users] 03 - Get available subscribed SKUs (to find the license SkuId)
+GET https://graph.microsoft.com/v1.0/subscribedSkus
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [Users] 03 - Assign a license to a user (with disabled service plans)
+# Replace {userId} with the new user's object ID
+# Replace {skuId} and {disabledPlanId} with actual GUIDs
+POST https://graph.microsoft.com/v1.0/users/{userId}/assignLicense
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "addLicenses": [
+    {
+      "skuId": "{skuId}",
+      "disabledPlans": ["{disabledPlanId1}", "{disabledPlanId2}"]
+    }
+  ],
+  "removeLicenses": []
+}
+
+
+# ============================================================
+# SECTION 9: TD SAMPLES (Tenant-to-Tenant / Device Management)
+# ============================================================
+
+# ── Settings Catalog Policies ──────────────────────────────
+
+###
+# [TD] List all Settings Catalog configuration policies (paginated)
+# Permission: DeviceManagementConfiguration.Read.All
+GET https://graph.microsoft.com/beta/deviceManagement/configurationPolicies
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] List Settings Catalog policies - top 10 only
+GET https://graph.microsoft.com/beta/deviceManagement/configurationPolicies
+    ?$top=10
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Get a single Settings Catalog policy by ID
+# Replace {policyId} with actual policy ID
+GET https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/{policyId}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Get settings for a specific Settings Catalog policy
+# Replace {policyId} with actual policy ID
+GET https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/{policyId}/settings
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Create / Import a Settings Catalog policy
+# Permission: DeviceManagementConfiguration.ReadWrite.All
+POST https://graph.microsoft.com/beta/deviceManagement/configurationPolicies
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "name": "Example Policy Name",
+  "description": "Imported from source tenant",
+  "platforms": "windows10",
+  "technologies": "mdm",
+  "templateReference": {
+    "templateId": ""
+  },
+  "settings": []
+}
+
+###
+# [TD] Delete a specific Settings Catalog policy
+# Permission: DeviceManagementConfiguration.ReadWrite.All
+# Replace {policyId} with actual policy ID
+DELETE https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/{policyId}
+Authorization: Bearer {{accessToken}}
+
+# ── Legacy Device Configuration Profiles ──────────────────
+
+###
+# [TD] List all legacy device configuration profiles
+# Permission: DeviceManagementConfiguration.Read.All
+GET https://graph.microsoft.com/v1.0/deviceManagement/deviceConfigurations
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Create / Import a legacy device configuration profile
+# Permission: DeviceManagementConfiguration.ReadWrite.All
+POST https://graph.microsoft.com/v1.0/deviceManagement/deviceConfigurations
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "@odata.type": "#microsoft.graph.windows10GeneralConfiguration",
+  "displayName": "Example Config Profile",
+  "description": "Imported from source tenant"
+}
+
+###
+# [TD] Delete a specific legacy device configuration profile
+# Replace {profileId} with actual profile ID
+DELETE https://graph.microsoft.com/v1.0/deviceManagement/deviceConfigurations/{profileId}
+Authorization: Bearer {{accessToken}}
+
+# ── Golden Policy Promotion ────────────────────────────────
+
+###
+# [TD] Get all Settings Catalog policies (used for golden policy filtering)
+GET https://graph.microsoft.com/beta/deviceManagement/configurationPolicies
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Get settings for a golden policy to promote
+# Replace {goldenPolicyId} with the source policy's ID
+GET https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/{goldenPolicyId}/settings
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Promote (create) a golden policy in the destination tenant
+POST https://graph.microsoft.com/beta/deviceManagement/configurationPolicies
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "name": "Promoted Policy Name",
+  "description": "Promoted from TEST on 2026-02-28",
+  "platforms": "windows10",
+  "technologies": "mdm",
+  "templateReference": {
+    "templateId": ""
+  },
+  "settings": []
+}
+
+# ── BitLocker ─────────────────────────────────────────────
+
+###
+# [TD] List all BitLocker recovery key metadata (no key values)
+# Permission: BitlockerKey.ReadBasic.All
+GET https://graph.microsoft.com/v1.0/informationProtection/bitlocker/recoveryKeys
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Get the actual BitLocker recovery key value for a specific key
+# Permission: BitlockerKey.Read.All (triggers audit log entry)
+# Replace {keyId} with the BitLocker key ID
+GET https://graph.microsoft.com/v1.0/informationProtection/bitlocker/recoveryKeys/{keyId}
+    ?$select=key
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Look up BitLocker keys by device ID
+# Replace {deviceId} with the Azure AD device ID (azureADDeviceId)
+GET https://graph.microsoft.com/v1.0/informationProtection/bitlocker/recoveryKeys
+    ?$filter=deviceId eq '{deviceId}'
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Get a device from Entra ID by display name (to resolve device ID)
+# Permission: Device.Read.All
+GET https://graph.microsoft.com/v1.0/devices
+    ?$filter=displayName eq 'LAPTOP-CORP-01'
+    &$top=1
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Get all managed Windows devices with relevant fields (BitLocker coverage report)
+# Permission: DeviceManagementManagedDevices.Read.All
+GET https://graph.microsoft.com/v1.0/deviceManagement/managedDevices
+    ?$filter=operatingSystem eq 'Windows'
+    &$select=id,deviceName,azureADDeviceId,serialNumber,operatingSystem,osVersion,complianceState,enrolledDateTime,lastSyncDateTime
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+# ── Windows Hello for Business ────────────────────────────
+
+###
+# [TD] List WHfB registrations for a specific user
+# Permission: UserAuthenticationMethod.Read.All
+# Replace {userId} with the user's UPN or object ID
+GET https://graph.microsoft.com/v1.0/users/{userId}/authentication/windowsHelloForBusinessMethods
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Delete a WHfB registration for a user
+# Replace {userId} and {whfbKeyId} with actual values
+DELETE https://graph.microsoft.com/v1.0/users/{userId}/authentication/windowsHelloForBusinessMethods/{whfbKeyId}
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] List all authentication methods for a user
+# Replace {userId} with the user's UPN or object ID
+GET https://graph.microsoft.com/v1.0/users/{userId}/authentication/methods
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+# ── Authentication Methods & MFA ──────────────────────────
+
+###
+# [TD] MFA / passwordless registration report (all users)
+# Permission: UserAuthenticationMethod.Read.All, AuditLog.Read.All
+GET https://graph.microsoft.com/beta/reports/authenticationMethods/userRegistrationDetails
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Get tenant-wide authentication methods policy
+# Permission: Policy.Read.All
+GET https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+# [TD] Enable FIDO2 passwordless method for a pilot group
+# Permission: Policy.ReadWrite.AuthenticationMethod
+PATCH https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy/authenticationMethodConfigurations/fido2
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "@odata.type": "#microsoft.graph.fido2AuthenticationMethodConfiguration",
+  "state": "enabled",
+  "includeTargets": [
+    {
+      "targetType": "group",
+      "id": "{entraGroupId}",
+      "isRegistrationRequired": false
+    }
+  ]
+}
+
+###
+# [TD] Query sign-in logs (beta) - last 7 days, top 50
+# authenticationDetails is beta-only
+# Permission: AuditLog.Read.All
+GET https://graph.microsoft.com/beta/auditLogs/signIns
+    ?$filter=createdDateTime ge 2026-02-21T00:00:00Z
+    &$top=50
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+GET https://graph.microsoft.com/beta/devices
+    ?$top=50
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
